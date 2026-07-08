@@ -25,18 +25,20 @@ from airflow.sdk import dag, task
     schedule="* * * * *",  # every minute -> sustained pressure with stacked runs
     start_date=datetime(2026, 7, 1),
     catchup=False,
-    max_active_runs=6,
+    max_active_runs=8,
     tags=["repro", "slotleak", "zd93581"],
 )
 def slotleak_churn():
+    # v2 (intensified): FIXED short sleep so a full slot-batch (~20) exits at nearly
+    # the same instant -> SIGCHLD storms that pressure the agent's SIGCHLD-handler-vs-
+    # polling-loop reap race ("reaped by another signal handler" -> no TaskProcFinished
+    # -> leaked slot). Staggered/random exits get reaped cleanly by the poll loop.
     @task(max_active_tis_per_dag=64)
     def churn(i: int) -> int:
-        # Short, variable sleeps -> tasks finish rapidly and at staggered times,
-        # producing frequent SIGCHLD delivery that races the reaper poll loop.
-        time.sleep(random.uniform(0.5, 4.0))
+        time.sleep(1.0)  # fixed -> simultaneous batch exits
         return i
 
-    churn.expand(i=list(range(150)))
+    churn.expand(i=list(range(300)))
 
 
 slotleak_churn()
